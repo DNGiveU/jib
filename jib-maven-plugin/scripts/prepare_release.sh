@@ -1,11 +1,7 @@
 #!/bin/bash -
-# Usage: ./scripts/prepare_release.sh <release version>
+# Usage: ./jib-maven-plugin/scripts/prepare_release.sh <release version> [<post-release version>]
 
-set -e
-
-Colorize() {
-	echo "$(tput setff $2)$1$(tput sgr0)"
-}
+set -o errexit
 
 EchoRed() {
 	echo "$(tput setaf 1; tput bold)$1$(tput sgr0)"
@@ -20,63 +16,46 @@ Die() {
 }
 
 DieUsage() {
-    Die "Usage: ./scripts/prepare_release.sh <release version>"
+    Die "Usage: ./jib-maven-plugin/scripts/prepare_release.sh <release version> [<post-release version>]"
 }
 
 # Usage: CheckVersion <version>
 CheckVersion() {
-    [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || Die "Version not in ###.###.### format."
+    [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+)?$ ]] || Die "Version: $1 not in ###.###.###[-XXX] format."
 }
 
-# Usage: IncrementVersion <version>
-IncrementVersion() {
-    local version=$1
-    local minorVersion=$(echo $version | sed 's/[0-9][0-9]*\.[0-9][0-9]*\.\([0-9][0-9]\)*/\1/')
-    local nextMinorVersion=$((minorVersion+1))
-    echo $version | sed "s/\([0-9][0-9]*\.[0-9][0-9]*\)\.[0-9][0-9]*/\1.$nextMinorVersion/"
-}
-
-[ $# -ne 2 ] || DieUsage
+[ $# -ne 1 ] && [ $# -ne 2 ] && DieUsage
 
 EchoGreen '===== RELEASE SETUP SCRIPT ====='
 
 VERSION=$1
 CheckVersion ${VERSION}
-
-NEXT_VERSION=$(IncrementVersion $VERSION)
-CheckVersion ${NEXT_VERSION}
+if [ -n "$2" ]; then
+  POST_RELEASE_VERSION=$2
+  CheckVersion ${POST_RELEASE_VERSION}
+fi
 
 if [[ $(git status -uno --porcelain) ]]; then
     Die 'There are uncommitted changes.'
 fi
 
 # Runs integration tests.
-./mvnw -X -Pintegration-tests verify
+./gradlew jib-maven-plugin:integrationTest --info --stacktrace
 
 # Checks out a new branch for this version release (eg. 1.5.7).
 BRANCH=maven_release_v${VERSION}
 git checkout -b ${BRANCH}
 
-# Updates the pom.xml with the version to release.
-mvn versions:set versions:commit -DnewVersion=${VERSION}
+# Changes the version for release and creates the commits/tags.
+echo | ./gradlew jib-maven-plugin:release -Prelease.releaseVersion=${VERSION} ${POST_RELEASE_VERSION:+"-Prelease.newVersion=${POST_RELEASE_VERSION}"}
 
-# Tags a new commit for this release.
-TAG=v${VERSION}-maven
-git commit -am "preparing release ${VERSION}"
-git tag ${TAG}
-
-# Updates the pom.xml with the next snapshot version.
-# For example, when releasing 1.5.7, the next snapshot version would be 1.5.8-SNAPSHOT.
-NEXT_SNAPSHOT=${NEXT_VERSION}-SNAPSHOT
-mvn versions:set versions:commit -DnewVersion=${NEXT_SNAPSHOT}
-
-# Commits this next snapshot version.
-git commit -am "${NEXT_SNAPSHOT}"
-
-# Pushes the tag and release branch to Github.
+# Pushes the release branch and tag to Github.
 git push origin ${BRANCH}
-git push origin ${TAG}
+git push origin v${VERSION}-maven
 
 # File a PR on Github for the new branch. Have someone LGTM it, which gives you permission to continue.
 EchoGreen 'File a PR for the new release branch:'
-echo https://github.com/GoogleContainerTools/jib/compare/${BRANCH}
+echo https://github.com/GoogleContainerTools/jib/pull/new/${BRANCH}
+
+EchoGreen "Merge the PR after the plugin is released."
+EchoGreen "Run './jib-maven-plugin/scripts/update_gcs_latest.sh ${VERSION}' when the release is complete to update the latest version string on GCS."

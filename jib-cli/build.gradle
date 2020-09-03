@@ -1,0 +1,40 @@
+plugins {
+  id 'application'
+  id 'eclipse'
+}
+
+ext {
+  cliMainClass = 'com.google.cloud.tools.jib.cli.JibCli'
+}
+
+// use `run` to build and run the app
+// use `installDist` or `distZip` to create an installable application
+application {
+  applicationName = 'jib'
+  mainClassName = cliMainClass
+}
+
+dependencies {
+  implementation project(':jib-core')
+  implementation dependencyStrings.JACKSON_DATAFORMAT_YAML
+  implementation dependencyStrings.JACKSON_DATABIND
+  implementation dependencyStrings.GUAVA
+  implementation dependencyStrings.PICOCLI
+
+  testImplementation dependencyStrings.JUNIT
+  testImplementation dependencyStrings.MOCKITO_CORE
+  testImplementation dependencyStrings.SLF4J_API
+  testImplementation dependencyStrings.SYSTEM_RULES
+}
+
+/* ECLIPSE */
+// TODO: remove after upgrading to Gradle 5.6. (https://github.com/eclipse/buildship/issues/689)
+// Also remove the 'eclipse' plugin.
+eclipse.classpath.file.whenMerged {
+  entries.findAll {
+    it.path in ['src/test/java', 'src/test/resources', 'test-resources']
+  }.each {
+    it.entryAttributes['test'] = 'true'
+  }
+}
+/* ECLIPSE */
